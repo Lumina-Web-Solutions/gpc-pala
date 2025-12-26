@@ -1,44 +1,53 @@
-import { initializeApp, getApps, cert } from "firebase-admin/app";
+import { initializeApp, getApps, getApp, cert, ServiceAccount } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
-import path from "path";
-import fs from "fs";
 
-// 1. Define path to the file
-const localKeyPath = path.join(process.cwd(), "service-account.json");
-let serviceAccount;
+// 1. Prepare the Service Account Key
+let serviceAccount: ServiceAccount;
 
-// 2. Force Read from File
-try {
-  console.log("🔍 FIREBASE INIT: Looking for key at:", localKeyPath);
+console.log("---------------------------------------------------");
+console.log("🔥 FIREBASE ADMIN INIT START");
+
+// CHECK: Is the variable inside Vercel?
+if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+  console.log("✅ FOUND Environment Variable: FIREBASE_SERVICE_ACCOUNT_KEY");
   
-  if (fs.existsSync(localKeyPath)) {
-    const fileContent = fs.readFileSync(localKeyPath, "utf8");
-    serviceAccount = JSON.parse(fileContent);
-    console.log("✅ FIREBASE INIT: Key loaded successfully for project:", serviceAccount.project_id);
-  } else {
-    console.error("❌ FIREBASE INIT: File NOT found at path.");
-    // Only verify Env var if file is missing (Vercel fallback)
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      console.log("☁️ FIREBASE INIT: Attempting to use Env Variable...");
-      const rawEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
-      const jsonString = rawEnv.startsWith("{") 
-        ? rawEnv 
-        : Buffer.from(rawEnv, 'base64').toString('utf-8');
-      serviceAccount = JSON.parse(jsonString);
-    }
+  try {
+    // Try to parse it
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+    console.log("✅ JSON Parse Successful. Project ID:", serviceAccount.projectId);
+  } catch (error) {
+    console.error("❌ CRITICAL ERROR: Could not parse JSON from Env Var.");
+    console.error(error);
   }
-} catch (error) {
-  console.error("❌ FIREBASE INIT ERROR:", error);
+
+} else {
+  console.log("⚠️ Environment Variable NOT found.");
+  console.log("   Checking for local file (Development Mode)...");
+  
+  try {
+    serviceAccount = require("../../service-account.json");
+    console.log("✅ Found local service-account.json");
+  } catch (e) {
+    console.error("❌ File NOT found. You are in Production but have no Env Var.");
+  }
 }
 
-// 3. Initialize Firebase (Singleton Pattern)
-const app = getApps().length > 0 
-  ? getApps()[0] 
-  : initializeApp({
-      credential: cert(serviceAccount),
-    });
+// 2. Safety Check
+if (!serviceAccount) {
+  console.error("❌ STOPPING BUILD: No Service Account Credential available.");
+  throw new Error("Firebase Admin Init Failed: No Credentials");
+}
 
-// 4. Export Auth and DB
-export const adminDb = getFirestore(app);
-export const adminAuth = getAuth(app);
+// 3. Initialize Firebase Admin
+export const adminApp = !getApps().length
+  ? initializeApp({
+      credential: cert(serviceAccount),
+    })
+  : getApp();
+
+export const adminAuth = getAuth(adminApp);
+export const adminDb = getFirestore(adminApp);
+
+console.log("🔥 FIREBASE ADMIN INIT COMPLETE");
+console.log("---------------------------------------------------");
